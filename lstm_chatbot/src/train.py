@@ -5,6 +5,14 @@ from numpy import random
 from torch import nn
 
 
+def maskNLLLoss(inp, target, mask):
+    nTotal = mask.sum()
+    crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
+    loss = crossEntropy.masked_select(mask).mean()
+    loss = loss.to(device)
+    return loss, nTotal.item()
+
+
 def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder, embedding,
           encoder_optimizer, decoder_optimizer, batch_size, clip, max_length=MAX_LENGTH):
 
