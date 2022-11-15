@@ -4,6 +4,11 @@ SOS_token = 1  # Start-of-sentence token
 EOS_token = 2  # End-of-sentence token
 
 
+#####################################
+#
+# Taken from LSTM Chatbot tutorial https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
+#
+#####################################
 class Voc:
     def __init__(self, name):
         self.name = name
@@ -46,7 +51,7 @@ class Voc:
         self.word2index = {}
         self.word2count = {}
         self.index2word = {PAD_token: "PAD", SOS_token: "SOS", EOS_token: "EOS"}
-        self.num_words = 3 # Count default tokens
+        self.num_words = 3  # Count default tokens
 
         for word in keep_words:
             self.addWord(word)
