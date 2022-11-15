@@ -1,3 +1,4 @@
+import random
 import re
 
 import gensim
@@ -10,6 +11,7 @@ import torchtext
 import unicodedata
 from nltk.corpus import brown
 
+from src.data_to_tensors import batch_to_train_data
 from src.vocab import Voc
 
 nltk.download('brown')
@@ -61,7 +63,7 @@ def prepare_text(sentence):
 
 # Turn a Unicode string to plain ASCII, thanks to
 # https://stackoverflow.com/a/518232/2809427
-def unicodeToAscii(s):
+def unicode_to_ascii(s):
     return ''.join(
         c for c in unicodedata.normalize('NFD', s)
         if unicodedata.category(c) != 'Mn'
@@ -70,8 +72,8 @@ def unicodeToAscii(s):
 
 # Lowercase, trim, and remove non-letter characters
 # Taken from LSTM Chatbot tutorial https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
-def normalizeString(s):
-    s = unicodeToAscii(s.lower().strip())
+def normalize_string(s):
+    s = unicode_to_ascii(s.lower().strip())
     s = re.sub(r"([.!?])", r" \1", s)
     s = re.sub(r"[^a-zA-Z.!?]+", r" ", s)
     s = re.sub(r"\s+", r" ", s).strip()
@@ -87,12 +89,12 @@ def filterPair(p):
 
 # Filter pairs using filterPair condition
 # Taken from LSTM Chatbot tutorial https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
-def filterPairs(pairs):
+def filter_pairs(pairs):
     return [pair for pair in pairs if filterPair(pair)]
 
 
 # Taken from LSTM Chatbot tutorial https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
-def trimRareWords(voc, pairs, min_count):
+def trim_rare_words(voc, pairs, min_count):
     # Trim words used under the MIN_COUNT from the voc
     voc.trim(min_count)
     # Filter out pairs with trimmed words
@@ -131,11 +133,11 @@ def create_vocab_object(df: pd.DataFrame, dataset_name: str):
     print("Reading lines...")
     # Read the file and split into lines
     # Split every line into pairs and normalize
-    pairs = [[normalizeString(s) for s in l] for l in df.values]
+    pairs = [[normalize_string(s) for s in l] for l in df.values]
     voc = Voc(dataset_name)
 
     print("Read {!s} sentence pairs".format(len(pairs)))
-    pairs = filterPairs(pairs)
+    pairs = filter_pairs(pairs)
     print("Trimmed to {!s} sentence pairs".format(len(pairs)))
     print("Counting words...")
     for pair in pairs:
@@ -165,10 +167,22 @@ def train_test_split(SRC, TRG):
     return SRC_train_dataset, SRC_test_dataset, TRG_train_dataset, TRG_test_dataset
 
 
+def get_batches_from_dataset(dataset_name, batch_length):
+    df = loadDF('./', dataset_name)
+    voc, pairs = create_vocab_object(df, dataset_name)
+    pairs = trim_rare_words(voc, pairs, MIN_COUNT)
+
+    batches = batch_to_train_data(voc, [random.choice(pairs) for _ in range(batch_length)])
+    input_variable, lengths, target_variable, mask, max_target_len = batches
+
+    print("input_variable:", input_variable)
+    print("lengths:", lengths)
+    print("target_variable:", target_variable)
+    print("mask:", mask)
+    print("max_target_len:", max_target_len)
+
+    return input_variable, lengths, target_variable, mask, max_target_len, voc, pairs
+
+
 if __name__ == '__main__':
-    dataset = 'squad1'
-    df = loadDF('./', dataset)
-    voc, pairs = create_vocab_object(df, dataset)
-    voc, pairs = trimRareWords(voc, pairs, MIN_COUNT)
-    
-    print('yo')
+    get_batches_from_dataset('squad1', 5)

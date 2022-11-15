@@ -2,14 +2,20 @@ import os
 
 import torch
 from numpy import random
-from torch import nn
+from torch import nn, optim
+
+from src.data_to_tensors import batch_to_train_data
+from src.model import Encoder, Decoder
+from src.prepare_data import MAX_LENGTH, get_batches_from_dataset
+from src.vocab import SOS_token
 
 
 def maskNLLLoss(inp, target, mask):
     nTotal = mask.sum()
     crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
     loss = crossEntropy.masked_select(mask).mean()
-    loss = loss.to(device)
+    if torch.cuda.is_available():
+        loss = loss.to('cuda')
     return loss, nTotal.item()
 
 
@@ -38,7 +44,8 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
-    decoder_input = decoder_input.to(device)
+    if torch.cuda.is_available():
+        decoder_input = decoder_input.to('cuda')
 
     # Set initial decoder hidden state to the encoder's final hidden state
     decoder_hidden = encoder_hidden[:decoder.n_layers]
@@ -67,7 +74,8 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             # No teacher forcing: next input is decoder's own current output
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
-            decoder_input = decoder_input.to(device)
+            if torch.cuda.is_available():
+                decoder_input = decoder_input.to('cuda')
             # Calculate and accumulate loss
             mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
             loss += mask_loss
@@ -88,19 +96,19 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     return sum(print_losses) / n_totals
 
 
-def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
-               encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size, print_every,
-               save_every, clip, corpus_name, loadFilename):
+def train_iterations(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
+                     encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size, print_every,
+                     save_every, clip, corpus_name, load_filename):
 
     # Load batches for each iteration
-    training_batches = [batch2TrainData(voc, [random.choice(pairs) for _ in range(batch_size)])
+    training_batches = [batch_to_train_data(voc, [random.choice(pairs) for _ in range(batch_size)])
                       for _ in range(n_iteration)]
 
     # Initializations
     print('Initializing ...')
     start_iteration = 1
     print_loss = 0
-    if loadFilename:
+    if load_filename:
         start_iteration = checkpoint['iteration'] + 1
 
     # Training loop
@@ -122,8 +130,9 @@ def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, deco
             print_loss = 0
 
         # Save checkpoint
-        if (iteration % save_every == 0):
-            directory = os.path.join(save_dir, model_name, corpus_name, '{}-{}_{}'.format(encoder_n_layers, decoder_n_layers, hidden_size))
+        if iteration % save_every == 0:
+            directory = os.path.join(save_dir, model_name, corpus_name, '{}-{}_{}'
+                                     .format(encoder_n_layers, decoder_n_layers, hidden_size))
             if not os.path.exists(directory):
                 os.makedirs(directory)
             torch.save({
@@ -138,7 +147,56 @@ def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, deco
             }, os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
 
 
-def run_training():
+def build_models(load_filename: bool = False):
+    # Configure models
+    hidden_size = 500
+    encoder_n_layers = 2
+    decoder_n_layers = 2
+    dropout = 0.1
+    batch_size = 64
+    dataset_name = 'squad1'
+
+    batch_struct = get_batches_from_dataset(dataset_name, batch_size)
+    input_variable, lengths, target_variable, mask, max_target_len, voc, pairs = batch_struct
+
+    # Load model if a loadFilename is provided
+    if load_filename:
+        # If loading on same machine the model was trained on
+        checkpoint = torch.load('temp.chkpt')
+        # If loading a model trained on GPU to CPU
+        # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
+        encoder_sd = checkpoint['en']
+        decoder_sd = checkpoint['de']
+        encoder_optimizer_sd = checkpoint['en_opt']
+        decoder_optimizer_sd = checkpoint['de_opt']
+        embedding_sd = checkpoint['embedding']
+        voc.__dict__ = checkpoint['voc_dict']
+
+    print('Building encoder and decoder ...')
+    # Initialize word embeddings
+    embedding = nn.Embedding(voc.num_words, hidden_size)
+    if load_filename:
+        embedding.load_state_dict(embedding_sd)
+    # Initialize encoder & decoder models
+    encoder = Encoder(hidden_size, embedding, encoder_n_layers)
+    decoder = Decoder(embedding, hidden_size, voc.num_words, decoder_n_layers)
+    if load_filename:
+        encoder.load_state_dict(encoder_sd)
+        decoder.load_state_dict(decoder_sd)
+    # Use appropriate device
+    if torch.cuda.is_available():
+        encoder = encoder.to('cuda')
+        decoder = decoder.to('cuda')
+    print('Models built and ready to go!')
+    if not load_filename:
+        return encoder, decoder, embedding
+    else:
+        return encoder, decoder, encoder_optimizer_sd, decoder_optimizer_sd
+
+
+def run_training(encoder: Encoder, decoder: Decoder, load_filename: bool,
+                 encoder_optimizer_sd, decoder_optimizer_sd):
+
     # Configure training/optimization
     clip = 50.0
     teacher_forcing_ratio = 1.0
@@ -156,7 +214,7 @@ def run_training():
     print('Building optimizers ...')
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * decoder_learning_ratio)
-    if loadFilename:
+    if load_filename:
         encoder_optimizer.load_state_dict(encoder_optimizer_sd)
         decoder_optimizer.load_state_dict(decoder_optimizer_sd)
 
@@ -173,6 +231,6 @@ def run_training():
 
     # Run training iterations
     print("Starting Training!")
-    trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
-               embedding, encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size,
-               print_every, save_every, clip, corpus_name, loadFilename)
+    train_iterations(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
+                     embedding, encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size,
+                     print_every, save_every, clip, corpus_name, loadFilename)
