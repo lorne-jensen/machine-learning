@@ -3,6 +3,8 @@ from torch import nn
 
 from src.vocab import SOS_token
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class GreedySearchDecoder(nn.Module):
     def __init__(self, encoder, decoder):

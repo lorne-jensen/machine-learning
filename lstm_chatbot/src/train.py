@@ -10,12 +10,14 @@ from src.prepare_data import MAX_LENGTH, get_batches_from_dataset
 from src.vocab import SOS_token
 
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def maskNLLLoss(inp, target, mask):
     nTotal = mask.sum()
     crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
     loss = crossEntropy.masked_select(mask).mean()
-    if torch.cuda.is_available():
-        loss = loss.to('cuda')
+    loss = loss.to(device)
     return loss, nTotal.item()
 
 
@@ -27,10 +29,9 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     decoder_optimizer.zero_grad()
 
     # Set device options
-    if torch.cuda.is_available():
-        input_variable = input_variable.to('cuda')
-        target_variable = target_variable.to('cuda')
-        mask = mask.to('cuda')
+    input_variable = input_variable.to(device)
+    target_variable = target_variable.to(device)
+    mask = mask.to(device)
     # Lengths for rnn packing should always be on the cpu
     lengths = lengths.to("cpu")
 
@@ -44,8 +45,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
-    if torch.cuda.is_available():
-        decoder_input = decoder_input.to('cuda')
+    decoder_input = decoder_input.to(device)
 
     # Set initial decoder hidden state to the encoder's final hidden state
     decoder_hidden = encoder_hidden[:decoder.n_layers]
@@ -74,8 +74,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             # No teacher forcing: next input is decoder's own current output
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
-            if torch.cuda.is_available():
-                decoder_input = decoder_input.to('cuda')
+            decoder_input = decoder_input.to(device)
             # Calculate and accumulate loss
             mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
             loss += mask_loss
@@ -184,9 +183,8 @@ def build_models(load_filename: bool = False):
         encoder.load_state_dict(encoder_sd)
         decoder.load_state_dict(decoder_sd)
     # Use appropriate device
-    if torch.cuda.is_available():
-        encoder = encoder.to('cuda')
-        decoder = decoder.to('cuda')
+    encoder = encoder.to(device)
+    decoder = decoder.to(device)
     print('Models built and ready to go!')
     if not load_filename:
         return encoder, decoder, embedding

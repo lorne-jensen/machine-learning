@@ -12,7 +12,7 @@ import unicodedata
 from nltk.corpus import brown
 
 from src.data_to_tensors import batch_to_train_data
-from src.vocab import Voc
+from src.vocab import Voc, EOS_token
 
 nltk.download('brown')
 nltk.download('punkt')
@@ -27,8 +27,36 @@ w2v = gensim.models.Word2Vec.load('brown.embedding')
 MAX_LENGTH = 15  # Maximum sentence length to consider
 MIN_COUNT = 3    # Minimum word count threshold for trimming
 
+DATA_HOME = 'A:/machine_learning/data'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def loadDF(path, dataset_name):
+
+#########################
+# modified from https://www.guru99.com/seq2seq-model.html
+#########################
+def indexes_from_sentence(voc: Voc, sentence):
+    return [voc.word2index[word] for word in sentence.split(' ')]
+
+
+#########################
+# modified from https://www.guru99.com/seq2seq-model.html
+#########################
+def tensor_from_sentence(voc: Voc, sentence):
+    indexes = indexes_from_sentence(voc, sentence)
+    indexes.append(EOS_token)
+    return torch.tensor(indexes, dtype=torch.long, device=device).view(-1, 1)
+
+
+#########################
+# modified from https://www.guru99.com/seq2seq-model.html
+#########################
+def tensor_from_pair(voc, pair):
+    input_tensor = tensor_from_sentence(voc, pair[0])
+    target_tensor = tensor_from_sentence(voc, pair[1])
+    return input_tensor, target_tensor
+
+
+def load_dataframe(path, dataset_name):
     """
     You will use this function to load the dataset into a Pandas Dataframe for processing.
     """
@@ -168,7 +196,8 @@ def train_test_split(SRC, TRG):
 
 
 def get_batches_from_dataset(dataset_name, batch_length):
-    df = loadDF('./', dataset_name)
+
+    df = load_dataframe(DATA_HOME, dataset_name)
     voc, pairs = create_vocab_object(df, dataset_name)
     pairs = trim_rare_words(voc, pairs, MIN_COUNT)
 
