@@ -24,7 +24,7 @@ model.save('brown.embedding')
 
 w2v = gensim.models.Word2Vec.load('brown.embedding')
 
-MAX_LENGTH = 15  # Maximum sentence length to consider
+MAX_LENGTH = 25  # Maximum sentence length to consider
 MIN_COUNT = 3    # Minimum word count threshold for trimming
 
 DATA_HOME = 'A:/machine_learning/data'
