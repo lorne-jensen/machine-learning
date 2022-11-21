@@ -1,12 +1,12 @@
 import os
 
 import torch
-from numpy import random
+import random
 from torch import nn, optim
 
 from src.data_to_tensors import batch_to_train_data
 from src.model import Encoder, Decoder
-from src.prepare_data import MAX_LENGTH, get_batches_from_dataset
+from src.prepare_data import MAX_LENGTH, get_batches_from_dataset, DATA_HOME
 from src.vocab import SOS_token
 
 
@@ -21,8 +21,8 @@ def maskNLLLoss(inp, target, mask):
     return loss, nTotal.item()
 
 
-def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder, embedding,
-          encoder_optimizer, decoder_optimizer, batch_size, clip, max_length=MAX_LENGTH):
+def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
+          encoder_optimizer, decoder_optimizer, teacher_forcing_ratio, batch_size, max_length=MAX_LENGTH):
 
     # Zero gradients
     encoder_optimizer.zero_grad()
@@ -41,14 +41,14 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    encoder_outputs, encoder_hidden = encoder(input_variable)
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
     decoder_input = decoder_input.to(device)
 
     # Set initial decoder hidden state to the encoder's final hidden state
-    decoder_hidden = encoder_hidden[:decoder.n_layers]
+    decoder_hidden = encoder_hidden
 
     # Determine if we are using teacher forcing this iteration
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
@@ -56,9 +56,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     # Forward batch of sequences through decoder one time step at a time
     if use_teacher_forcing:
         for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+            decoder_output, decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
             # Teacher forcing: next input is current target
             decoder_input = target_variable[t].view(1, -1)
             # Calculate and accumulate loss
@@ -68,12 +66,10 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             n_totals += nTotal
     else:
         for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+            decoder_output, decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
             # No teacher forcing: next input is decoder's own current output
             _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = torch.LongTensor([[topi[0][i][0] for i in range(batch_size)]])
             decoder_input = decoder_input.to(device)
             # Calculate and accumulate loss
             mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
@@ -85,8 +81,8 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     loss.backward()
 
     # Clip gradients: gradients are modified in place
-    _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-    _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+    # _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    # _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
 
     # Adjust model weights
     encoder_optimizer.step()
@@ -95,20 +91,22 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     return sum(print_losses) / n_totals
 
 
-def train_iterations(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
-                     encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size, print_every,
-                     save_every, clip, corpus_name, load_filename):
+def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, embedding,
+                     n_iteration, batch_size, print_every,
+                     save_every, corpus_name, teacher_forcing_ratio, load_filename):
 
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * 5.0)
     # Load batches for each iteration
     training_batches = [batch_to_train_data(voc, [random.choice(pairs) for _ in range(batch_size)])
-                      for _ in range(n_iteration)]
+                        for _ in range(n_iteration)]
 
     # Initializations
     print('Initializing ...')
     start_iteration = 1
     print_loss = 0
-    if load_filename:
-        start_iteration = checkpoint['iteration'] + 1
+    # if load_filename:
+    #     start_iteration = checkpoint['iteration'] + 1
 
     # Training loop
     print("Training...")
@@ -118,20 +116,21 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, encoder_optimizer
         input_variable, lengths, target_variable, mask, max_target_len = training_batch
 
         # Run a training iteration with batch
-        loss = train(input_variable, lengths, target_variable, mask, max_target_len, encoder,
-                     decoder, embedding, encoder_optimizer, decoder_optimizer, batch_size, clip)
+        loss = train(input_variable, lengths, target_variable, mask, max_target_len,
+                     encoder, decoder, encoder_optimizer, decoder_optimizer, teacher_forcing_ratio,
+                     batch_size, MAX_LENGTH)
         print_loss += loss
 
         # Print progress
         if iteration % print_every == 0:
             print_loss_avg = print_loss / print_every
-            print("Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}".format(iteration, iteration / n_iteration * 100, print_loss_avg))
+            print("Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}"
+                  .format(iteration, iteration / n_iteration * 100, print_loss_avg))
             print_loss = 0
 
         # Save checkpoint
         if iteration % save_every == 0:
-            directory = os.path.join(save_dir, model_name, corpus_name, '{}-{}_{}'
-                                     .format(encoder_n_layers, decoder_n_layers, hidden_size))
+            directory = os.path.join(DATA_HOME, model_name, corpus_name)
             if not os.path.exists(directory):
                 os.makedirs(directory)
             torch.save({

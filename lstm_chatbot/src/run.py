@@ -1,10 +1,12 @@
 import random
 
 import torch.cuda
+from torch import nn
 
 from src.evaluate import evaluate_randomly
-from src.model import Seq2Seq
+from src.model import Seq2Seq, Encoder, Decoder
 from src.prepare_data import get_batches_from_dataset
+from src.train import train_iterations
 from src.train_model import train_model
 
 
@@ -27,15 +29,26 @@ embed_size = 512
 hidden_size = 512
 num_layers = 1
 num_iteration = 1000
+learning_rate = 0.0001
+teacher_forcing_ratio = 0.5
 
-model = Seq2Seq(encoder_input_size=input_size,
-                encoder_hidden_size=hidden_size,
-                encoder_embedding_size=embed_size,
-                decoder_hidden_size=hidden_size,
-                decoder_output_size=output_size,
-                decoder_embedding_size=embed_size,
-                num_layers=num_layers).to(device)
+embedding = nn.Embedding(voc.num_words, embed_size)
 
-model = train_model(model, voc, pairs, batch_size, num_iteration)
+encoder = Encoder(input_size, hidden_size, embedding, num_layers)
+decoder = Decoder(hidden_size, voc.num_words, embedding, num_layers)
 
-evaluate_randomly(model, source, target, pairs)
+model = Seq2Seq(encoder, decoder)
+# model = Seq2Seq(encoder_input_size=input_size,
+#                 encoder_hidden_size=hidden_size,
+#                 encoder_embedding_size=embed_size,
+#                 decoder_hidden_size=hidden_size,
+#                 decoder_output_size=output_size,
+#                 decoder_embedding_size=embed_size,
+#                 num_layers=num_layers).to(device)
+
+# model = train_model(model, voc, pairs, batch_size, num_iteration)
+#
+# evaluate_randomly(model, source, target, pairs)
+
+train_iterations('boof', voc, pairs, encoder, decoder, learning_rate, embedding,
+                 num_iteration, batch_size, 10, 10, dataset, teacher_forcing_ratio, False)
