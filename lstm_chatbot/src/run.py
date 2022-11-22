@@ -3,10 +3,11 @@ import random
 import torch.cuda
 from torch import nn
 
+from src.eval import evaluate_input
 from src.evaluate import evaluate_randomly
 from src.model import Seq2Seq, Encoder, Decoder
 from src.prepare_data import get_batches_from_dataset
-from src.train import train_iterations
+from src.train import train_iterations, build_models
 from src.train_model import train_model
 
 
@@ -31,24 +32,17 @@ num_layers = 1
 num_iteration = 1000
 learning_rate = 0.0001
 teacher_forcing_ratio = 0.5
+retrain = False
 
 embedding = nn.Embedding(voc.num_words, embed_size)
+if retrain:
+    encoder = Encoder(input_size, hidden_size, embedding, num_layers)
+    decoder = Decoder(hidden_size, voc.num_words, embedding, num_layers)
 
-encoder = Encoder(input_size, hidden_size, embedding, num_layers)
-decoder = Decoder(hidden_size, voc.num_words, embedding, num_layers)
+    train_iterations('boof', voc, pairs, encoder, decoder, learning_rate, embedding,
+                     num_iteration, batch_size, 10, 10, dataset, teacher_forcing_ratio, False)
 
-model = Seq2Seq(encoder, decoder)
-# model = Seq2Seq(encoder_input_size=input_size,
-#                 encoder_hidden_size=hidden_size,
-#                 encoder_embedding_size=embed_size,
-#                 decoder_hidden_size=hidden_size,
-#                 decoder_output_size=output_size,
-#                 decoder_embedding_size=embed_size,
-#                 num_layers=num_layers).to(device)
+# reload the checkpoints:
+encoder, decoder, _, _ = build_models(True)
 
-# model = train_model(model, voc, pairs, batch_size, num_iteration)
-#
-# evaluate_randomly(model, source, target, pairs)
-
-train_iterations('boof', voc, pairs, encoder, decoder, learning_rate, embedding,
-                 num_iteration, batch_size, 10, 10, dataset, teacher_forcing_ratio, False)
+evaluate_input(encoder, decoder, voc)

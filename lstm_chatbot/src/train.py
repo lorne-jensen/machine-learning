@@ -15,7 +15,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def maskNLLLoss(inp, target, mask):
     nTotal = mask.sum()
-    crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
+    # crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
+    crossEntropy = -torch.log(torch.gather(inp, 1, target.view(1, -1)).squeeze(1))
     loss = crossEntropy.masked_select(mask).mean()
     loss = loss.to(device)
     return loss, nTotal.item()
@@ -60,7 +61,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             # Teacher forcing: next input is current target
             decoder_input = target_variable[t].view(1, -1)
             # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
+            mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
             loss += mask_loss
             print_losses.append(mask_loss.item() * nTotal)
             n_totals += nTotal
@@ -68,11 +69,11 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
         for t in range(max_target_len):
             decoder_output, decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
             # No teacher forcing: next input is decoder's own current output
-            _, topi = decoder_output.topk(1)
-            decoder_input = torch.LongTensor([[topi[0][i][0] for i in range(batch_size)]])
+            _, topi = pred.topk(1)
+            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
             decoder_input = decoder_input.to(device)
             # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
+            mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
             loss += mask_loss
             print_losses.append(mask_loss.item() * nTotal)
             n_totals += nTotal
@@ -147,7 +148,7 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
 
 def build_models(load_filename: bool = False):
     # Configure models
-    hidden_size = 500
+    hidden_size = 512
     encoder_n_layers = 2
     decoder_n_layers = 2
     dropout = 0.1
@@ -159,8 +160,9 @@ def build_models(load_filename: bool = False):
 
     # Load model if a loadFilename is provided
     if load_filename:
+        directory = os.path.join(DATA_HOME, 'boof', dataset_name)
         # If loading on same machine the model was trained on
-        checkpoint = torch.load('temp.chkpt')
+        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(220, 'checkpoint')))
         # If loading a model trained on GPU to CPU
         # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
         encoder_sd = checkpoint['en']
@@ -176,8 +178,8 @@ def build_models(load_filename: bool = False):
     if load_filename:
         embedding.load_state_dict(embedding_sd)
     # Initialize encoder & decoder models
-    encoder = Encoder(hidden_size, embedding, encoder_n_layers)
-    decoder = Decoder(embedding, hidden_size, voc.num_words, decoder_n_layers)
+    encoder = Encoder(voc.num_words, hidden_size, embedding, encoder_n_layers)
+    decoder = Decoder(hidden_size, voc.num_words, embedding, decoder_n_layers)
     if load_filename:
         encoder.load_state_dict(encoder_sd)
         decoder.load_state_dict(decoder_sd)
@@ -196,7 +198,6 @@ def run_training(encoder: Encoder, decoder: Decoder, load_filename: bool,
 
     # Configure training/optimization
     clip = 50.0
-    teacher_forcing_ratio = 1.0
     learning_rate = 0.0001
     decoder_learning_ratio = 5.0
     n_iteration = 4000

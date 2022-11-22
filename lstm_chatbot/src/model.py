@@ -1,6 +1,7 @@
 import torch
 from numpy import random
 from torch import nn
+import torch.nn.functional as F
 
 from src.vocab import SOS_token, EOS_token
 
@@ -64,7 +65,7 @@ class Decoder(nn.Module):
         """
         v = self.embedding(input)
         out, hidden = self.lstm(v, last_hidden)
-        prediction = self.output(out.squeeze(0))
+        prediction = F.softmax(self.output(out.squeeze(0)))
 
         return out, hidden, prediction
 
@@ -86,7 +87,6 @@ class Seq2Seq(nn.Module):
         for _ in range(max_length):
 
             decoder_output, decoder_hidden, dec_pred = self.decoder(decoder_input, decoder_hidden, encoder_outputs)
-
 
 
         return 0
