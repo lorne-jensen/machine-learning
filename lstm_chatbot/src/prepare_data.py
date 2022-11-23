@@ -11,23 +11,27 @@ import torchtext
 import unicodedata
 from nltk.corpus import brown
 
+import os
+
 from src.data_to_tensors import batch_to_train_data
 from src.vocab import Voc, EOS_token
 
-nltk.download('brown')
-nltk.download('punkt')
-
-# Output, save, and load brown embeddings
-
-model = gensim.models.Word2Vec(brown.sents())
-model.save('brown.embedding')
-
-w2v = gensim.models.Word2Vec.load('brown.embedding')
+# nltk.download('brown')
+# nltk.download('punkt')
+#
+# # Output, save, and load brown embeddings
+#
+# model = gensim.models.Word2Vec(brown.sents())
+# model.save('brown.embedding')
+#
+# w2v = gensim.models.Word2Vec.load('brown.embedding')
 
 MAX_LENGTH = 25  # Maximum sentence length to consider
 MIN_COUNT = 3    # Minimum word count threshold for trimming
 
-DATA_HOME = 'A:/machine_learning/data'
+os.environ['MACHINE_LEARNING_DATA_HOME'] = 'E:/machine_learning_udacity/data'
+
+DATA_HOME = os.environ['MACHINE_LEARNING_DATA_HOME']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 

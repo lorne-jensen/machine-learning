@@ -148,9 +148,10 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
 
 def build_models(load_filename: bool = False):
     # Configure models
+    # these obviously need to be consistent with the models that were saved
     hidden_size = 512
-    encoder_n_layers = 2
-    decoder_n_layers = 2
+    encoder_n_layers = 1
+    decoder_n_layers = 1
     dropout = 0.1
     batch_size = 64
     dataset_name = 'squad1'
@@ -162,7 +163,7 @@ def build_models(load_filename: bool = False):
     if load_filename:
         directory = os.path.join(DATA_HOME, 'boof', dataset_name)
         # If loading on same machine the model was trained on
-        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(220, 'checkpoint')))
+        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(20, 'checkpoint')))
         # If loading a model trained on GPU to CPU
         # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
         encoder_sd = checkpoint['en']

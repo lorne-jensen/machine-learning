@@ -4,11 +4,11 @@ import torch.cuda
 from torch import nn
 
 from src.eval import evaluate_input
-from src.evaluate import evaluate_randomly
-from src.model import Seq2Seq, Encoder, Decoder
+# from src.evaluate import evaluate_randomly
+from src.model import Encoder, Decoder
 from src.prepare_data import get_batches_from_dataset
 from src.train import train_iterations, build_models
-from src.train_model import train_model
+# from src.train_model import train_model
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

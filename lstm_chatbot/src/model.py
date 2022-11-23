@@ -79,14 +79,14 @@ class Seq2Seq(nn.Module):
 
     def forward(self, input, input_length, max_length):
 
-        encoder_outputs, encoder_hidden = self.encoder(input, input_length)
+        encoder_outputs, encoder_hidden = self.encoder(input)
 
         decoder_hidden = encoder_hidden
         decoder_input = torch.ones(1, 1, device='cpu', dtype=torch.long) * SOS_token
 
         for _ in range(max_length):
 
-            decoder_output, decoder_hidden, dec_pred = self.decoder(decoder_input, decoder_hidden, encoder_outputs)
-
+            decoder_output, decoder_hidden, dec_pred = self.decoder(decoder_input, decoder_hidden)
+            
 
         return 0
