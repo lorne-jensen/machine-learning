@@ -29,7 +29,7 @@ from src.vocab import Voc, EOS_token
 MAX_LENGTH = 25  # Maximum sentence length to consider
 MIN_COUNT = 3    # Minimum word count threshold for trimming
 
-os.environ['MACHINE_LEARNING_DATA_HOME'] = 'A:/machine_learning/data'  # 'E:/machine_learning_udacity/data'
+os.environ['MACHINE_LEARNING_DATA_HOME'] = 'E:/machine_learning_udacity/data'  # 'A:/machine_learning/data'
 
 DATA_HOME = os.environ['MACHINE_LEARNING_DATA_HOME']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -67,6 +67,8 @@ def load_dataframe(path, dataset_name):
     # torchtext.datasets.SQuAD1(root: str = '.data', split: Union[Tuple[str], str] = ('train', 'dev'))
     if dataset_name == 'squad1':
         train_iter, dev_iter = torchtext.datasets.SQuAD1(path)  #, split=('train', 'test'))
+    elif dataset_name == 'squad2':
+        train_iter, dev_iter = torchtext.datasets.SQuAD2(path)
     else:
         raise Exception('Dataset {} not found'.format(dataset_name))
 

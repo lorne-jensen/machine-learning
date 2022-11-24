@@ -3,11 +3,13 @@ import os
 import torch
 import random
 from torch import nn, optim
+from torch.optim.lr_scheduler import StepLR
 
 from src.data_to_tensors import batch_to_train_data
 from src.model import Encoder, Decoder
 from src.prepare_data import MAX_LENGTH, get_batches_from_dataset, DATA_HOME
 from src.vocab import SOS_token
+import numpy as np
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -23,7 +25,8 @@ def maskNLLLoss(inp, target, mask):
 
 
 def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
-          encoder_optimizer, decoder_optimizer, teacher_forcing_ratio, batch_size, max_length=MAX_LENGTH):
+          encoder_optimizer, decoder_optimizer, teacher_forcing_ratio, batch_size,
+          max_length=MAX_LENGTH, clip=50):
 
     # Zero gradients
     encoder_optimizer.zero_grad()
@@ -42,7 +45,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable)
+    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
@@ -82,8 +85,8 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     loss.backward()
 
     # Clip gradients: gradients are modified in place
-    # _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-    # _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+    _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
 
     # Adjust model weights
     encoder_optimizer.step()
@@ -101,6 +104,9 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
     # Load batches for each iteration
     training_batches = [batch_to_train_data(voc, [random.choice(pairs) for _ in range(batch_size)])
                         for _ in range(n_iteration)]
+
+    scheduler_encoder = StepLR(encoder_optimizer, step_size=int(n_iteration / 20), gamma=0.1)
+    scheduler_decoder = StepLR(decoder_optimizer, step_size=int(n_iteration / 20), gamma=0.1)
 
     # Initializations
     print('Initializing ...')
@@ -121,6 +127,9 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
                      encoder, decoder, encoder_optimizer, decoder_optimizer, teacher_forcing_ratio,
                      batch_size, MAX_LENGTH)
         print_loss += loss
+
+        scheduler_encoder.step()
+        scheduler_decoder.step()
 
         # Print progress
         if iteration % print_every == 0:
@@ -153,7 +162,8 @@ def build_models(load_filename: bool = False,
                  batch_size=64,
                  embedding_size=256,
                  dataset_name='squad1',
-                 model_name='boof'):
+                 model_name='boof',
+                 iteration=1):
     # Configure models
 
     batch_struct = get_batches_from_dataset(dataset_name, batch_size)
@@ -163,7 +173,7 @@ def build_models(load_filename: bool = False,
     if load_filename:
         directory = os.path.join(DATA_HOME, model_name, dataset_name)
         # If loading on same machine the model was trained on
-        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(550, 'checkpoint')))
+        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
         # If loading a model trained on GPU to CPU
         # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
         encoder_sd = checkpoint['en']

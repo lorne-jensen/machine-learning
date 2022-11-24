@@ -8,7 +8,7 @@ from src.vocab import SOS_token, EOS_token
 
 class Encoder(nn.Module):
 
-    def __init__(self, input_size, hidden_size, embedding: nn.Embedding, num_layers):
+    def __init__(self, input_size, hidden_size, embedding: nn.Embedding, num_layers, dropout=0.1):
         super(Encoder, self).__init__()
 
         # self.embedding provides a vector representation of the inputs to our model
@@ -22,11 +22,13 @@ class Encoder(nn.Module):
         self.hidden = torch.zeros(1, 1, hidden_size)
 
         self.embedding = embedding
+        self.embedding_dropout = nn.Dropout(dropout)
         # Initialize LSTM; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
-        self.lstm = nn.LSTM(input_size=embedding.embedding_dim, hidden_size=hidden_size, num_layers=num_layers)
+        self.lstm = nn.LSTM(input_size=embedding.embedding_dim, hidden_size=hidden_size, num_layers=num_layers,
+                            dropout=(0 if num_layers == 1 else dropout))
 
-    def forward(self, i):
+    def forward(self, i, input_lengths):
         '''
         Inputs: i, the src vector
         Outputs: o, the encoder outputs
@@ -35,14 +37,22 @@ class Encoder(nn.Module):
         '''
         # Convert word indexes to embeddings
         embedded = self.embedding(i)
+        embedded = self.embedding_dropout(embedded)
         # Pack padded batch of sequences for RNN module
-        # Forward pass through LSTM, returns outputs, hidden, c
-        return self.lstm(embedded)
+        # # Forward pass through LSTM, returns outputs, hidden, c
+        # return self.lstm(embedded)
+        packed = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
+        # Forward pass through GRU
+        outputs, hidden = self.lstm(packed)
+        # Unpack padding
+        outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
+
+        return outputs, hidden
 
 
 class Decoder(nn.Module):
 
-    def __init__(self, hidden_size, output_size, embedding: nn.Embedding, num_layers):
+    def __init__(self, hidden_size, output_size, embedding: nn.Embedding, num_layers, dropout=0.1):
         super(Decoder, self).__init__()
 
         self.hidden_size = hidden_size
@@ -51,8 +61,11 @@ class Decoder(nn.Module):
         # self.embedding provides a vector representation of the target to our model
         self.embedding = embedding
 
+        self.embedding_dropout = nn.Dropout(dropout)
+
         # self.lstm, accepts the embeddings and outputs a hidden state
-        self.lstm = nn.LSTM(self.embedding.embedding_dim, hidden_size, num_layers=num_layers)
+        self.lstm = nn.LSTM(self.embedding.embedding_dim, hidden_size, num_layers=num_layers,
+                            dropout=(0 if num_layers == 1 else dropout))
 
         # self.ouput, predicts on the hidden state via a linear output layer
         self.output = nn.Linear(self.hidden_size, self.output_size)
@@ -64,6 +77,7 @@ class Decoder(nn.Module):
                 h, the hidden state
         """
         v = self.embedding(input)
+        v = self.embedding_dropout(v)
         out, hidden = self.lstm(v, last_hidden)
         prediction = F.softmax(self.output(out.squeeze(0)), dim=1)
 
@@ -82,7 +96,7 @@ class Seq2Seq(nn.Module):
 
     def forward(self, input, input_length, max_length):
 
-        encoder_outputs, encoder_hidden = self.encoder(input)
+        encoder_outputs, encoder_hidden = self.encoder(input, input_length)
 
         decoder_hidden = encoder_hidden
         decoder_input = torch.ones(1, 1, device='cpu', dtype=torch.long) * SOS_token
