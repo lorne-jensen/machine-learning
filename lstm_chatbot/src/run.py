@@ -26,23 +26,33 @@ input_size = voc.num_words
 output_size = voc.num_words
 # print('Input : {} Output : {}'.format(input_size, output_size))
 
-embed_size = 512
+embed_size = 256
 hidden_size = 512
-num_layers = 1
+num_layers = 2
 num_iteration = 1000
-learning_rate = 0.0001
+learning_rate = 0.00001
 teacher_forcing_ratio = 0.5
 retrain = False
 
 embedding = nn.Embedding(voc.num_words, embed_size)
+
+model_name = 'boof_lower_learning_rate'
+
 if retrain:
     encoder = Encoder(input_size, hidden_size, embedding, num_layers)
     decoder = Decoder(hidden_size, voc.num_words, embedding, num_layers)
 
-    train_iterations('boof', voc, pairs, encoder, decoder, learning_rate, embedding,
-                     num_iteration, batch_size, 10, 10, dataset, teacher_forcing_ratio, False)
+    train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, embedding,
+                     num_iteration, batch_size, 10, 10, dataset, teacher_forcing_ratio)
 
 # reload the checkpoints:
-encoder, decoder, _, _ = build_models(True)
+encoder, decoder, _, _ = build_models(load_filename=True,
+                                      hidden_size=hidden_size,
+                                      encoder_n_layers=num_layers,
+                                      decoder_n_layers=num_layers,
+                                      batch_size=batch_size,
+                                      dataset_name=dataset,
+                                      embedding_size=embed_size,
+                                      model_name=model_name)
 
 evaluate_input(encoder, decoder, voc)

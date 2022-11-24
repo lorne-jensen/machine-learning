@@ -94,7 +94,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
 def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, embedding,
                      n_iteration, batch_size, print_every,
-                     save_every, corpus_name, teacher_forcing_ratio, load_filename):
+                     save_every, corpus_name, teacher_forcing_ratio):
 
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * 5.0)
@@ -146,24 +146,24 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
             }, os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
 
 
-def build_models(load_filename: bool = False):
+def build_models(load_filename: bool = False,
+                 hidden_size=512,
+                 encoder_n_layers=1,
+                 decoder_n_layers=1,
+                 batch_size=64,
+                 embedding_size=256,
+                 dataset_name='squad1',
+                 model_name='boof'):
     # Configure models
-    # these obviously need to be consistent with the models that were saved
-    hidden_size = 512
-    encoder_n_layers = 1
-    decoder_n_layers = 1
-    dropout = 0.1
-    batch_size = 64
-    dataset_name = 'squad1'
 
     batch_struct = get_batches_from_dataset(dataset_name, batch_size)
     input_variable, lengths, target_variable, mask, max_target_len, voc, pairs = batch_struct
 
     # Load model if a loadFilename is provided
     if load_filename:
-        directory = os.path.join(DATA_HOME, 'boof', dataset_name)
+        directory = os.path.join(DATA_HOME, model_name, dataset_name)
         # If loading on same machine the model was trained on
-        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(220, 'checkpoint')))
+        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(550, 'checkpoint')))
         # If loading a model trained on GPU to CPU
         # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
         encoder_sd = checkpoint['en']
@@ -175,7 +175,7 @@ def build_models(load_filename: bool = False):
 
     print('Building encoder and decoder ...')
     # Initialize word embeddings
-    embedding = nn.Embedding(voc.num_words, hidden_size)
+    embedding = nn.Embedding(voc.num_words, embedding_size)
     if load_filename:
         embedding.load_state_dict(embedding_sd)
     # Initialize encoder & decoder models
