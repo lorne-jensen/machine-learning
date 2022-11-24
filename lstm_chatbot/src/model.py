@@ -65,7 +65,7 @@ class Decoder(nn.Module):
         """
         v = self.embedding(input)
         out, hidden = self.lstm(v, last_hidden)
-        prediction = F.softmax(self.output(out.squeeze(0)))
+        prediction = F.softmax(self.output(out.squeeze(0)), dim=1)
 
         return out, hidden, prediction
 
@@ -74,8 +74,11 @@ class Seq2Seq(nn.Module):
 
     def __init__(self, encoder: Encoder, decoder: Decoder):
         super(Seq2Seq, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoder: Encoder = encoder
+        self.encoder.to(self.device)
         self.decoder: Decoder = decoder
+        self.decoder.to(self.device)
 
     def forward(self, input, input_length, max_length):
 
@@ -84,9 +87,23 @@ class Seq2Seq(nn.Module):
         decoder_hidden = encoder_hidden
         decoder_input = torch.ones(1, 1, device='cpu', dtype=torch.long) * SOS_token
 
+        all_tokens = torch.zeros([0], device=self.device, dtype=torch.long)
+        all_scores = torch.zeros([0], device=self.device)
+
+        # Iteratively decode one word token at a time
         for _ in range(max_length):
+            # Forward pass through decoder
+            decoder_output, decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden)
+            # Obtain most likely word token and its softmax score
+            decoder_scores, decoder_input = torch.max(prediction, dim=1)
+            # Record token and score
+            all_tokens = torch.cat((all_tokens, decoder_input), dim=0)
+            all_scores = torch.cat((all_scores, decoder_scores), dim=0)
+            # Prepare current token to be next decoder input (add a dimension)
+            decoder_input = torch.unsqueeze(decoder_input, 0)
 
-            decoder_output, decoder_hidden, dec_pred = self.decoder(decoder_input, decoder_hidden)
-            
+            if decoder_input.data == EOS_token:
+                break
 
-        return 0
+        # Return collections of word tokens and scores
+        return all_tokens, all_scores

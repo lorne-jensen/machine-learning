@@ -29,7 +29,7 @@ from src.vocab import Voc, EOS_token
 MAX_LENGTH = 25  # Maximum sentence length to consider
 MIN_COUNT = 3    # Minimum word count threshold for trimming
 
-os.environ['MACHINE_LEARNING_DATA_HOME'] = 'E:/machine_learning_udacity/data'
+os.environ['MACHINE_LEARNING_DATA_HOME'] = 'A:/machine_learning/data'  # 'E:/machine_learning_udacity/data'
 
 DATA_HOME = os.environ['MACHINE_LEARNING_DATA_HOME']
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
