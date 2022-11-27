@@ -4,8 +4,9 @@ import torch
 
 from src.vocab import PAD_token, EOS_token
 
+#############################################################
 
-# All functions taken from LSTM Chatbot tutorial
+# All functions taken and modified from LSTM Chatbot tutorial
 # https://pytorch.org/tutorials/beginner/nlp/sequence_models_tutorial.html
 
 

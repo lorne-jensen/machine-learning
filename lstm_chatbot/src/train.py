@@ -7,7 +7,7 @@ from torch.optim.lr_scheduler import StepLR
 
 from src.data_to_tensors import batch_to_train_data
 from src.model import Encoder, Decoder
-from src.prepare_data import MAX_LENGTH, get_batches_from_dataset, DATA_HOME
+from src.prepare_data import MAX_LENGTH, get_vocab_and_sentence_pairs, DATA_HOME
 from src.vocab import SOS_token
 import numpy as np
 
@@ -18,16 +18,67 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def maskNLLLoss(inp, target, mask):
     nTotal = mask.sum()
     # crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
-    crossEntropy = -torch.log(torch.gather(inp, 1, target.view(1, -1)).squeeze(1))
+    # crossEntropy = -torch.log(torch.gather(inp, 1, target.view(1, -1)).squeeze(1))
+    crossEntropy = -torch.gather(inp, 1, target.view(1, -1).squeeze(1))
+    # crossEntropy = -inp.masked_select(torch.broadcast_to((target.view(-1, 1) - 2).ge(0), inp.size()))
     loss = crossEntropy.masked_select(mask).mean()
+    # loss = crossEntropy.mean()
     loss = loss.to(device)
     return loss, nTotal.item()
 
 
+def validate(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder, batch_size):
+
+    encoder.eval()
+    decoder.eval()
+
+    # Set device options
+    input_variable = input_variable.to(device)
+    target_variable = target_variable.to(device)
+    mask = mask.to(device)
+    # Lengths for rnn packing should always be on the cpu
+    lengths = lengths.to("cpu")
+
+    loss = 0
+    print_losses = []
+    n_totals = 0
+
+    # Forward pass through encoder
+    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+
+    # Create initial decoder input (start with SOS tokens for each sentence)
+    decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
+    decoder_input = decoder_input.to(device)
+
+    # Set initial decoder hidden state to the encoder's final hidden state
+    decoder_hidden = (torch.clone(encoder_hidden[0]).type(torch.float32),
+                      torch.clone(encoder_hidden[1]).type(torch.float32))
+
+    # Forward batch of sequences through decoder one time step at a time
+    # criterion = nn.NLLLoss()
+    with torch.no_grad():
+        for t in range(max_target_len):
+            decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
+            # No teacher forcing: next input is decoder's own current output
+            _, topi = pred.topk(1)
+            topi = topi
+            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = decoder_input.to(device)
+            # Calculate and accumulate loss
+            mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
+            loss += mask_loss
+            print_losses.append(mask_loss.item() * nTotal)
+            n_totals += nTotal
+
+    return sum(print_losses) / n_totals
+
+
 def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
           encoder_optimizer, decoder_optimizer, teacher_forcing_ratio, batch_size,
-          max_length=MAX_LENGTH, clip=50):
+          max_length=MAX_LENGTH, clip=50, voc=None):
 
+    encoder.train()
+    decoder.train()
     # Zero gradients
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
@@ -52,15 +103,17 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     decoder_input = decoder_input.to(device)
 
     # Set initial decoder hidden state to the encoder's final hidden state
-    decoder_hidden = encoder_hidden
+    decoder_hidden = (torch.clone(encoder_hidden[0]).type(torch.float32),
+                      torch.clone(encoder_hidden[1]).type(torch.float32))
 
     # Determine if we are using teacher forcing this iteration
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 
     # Forward batch of sequences through decoder one time step at a time
+    # criterion = nn.NLLLoss()
     if use_teacher_forcing:
         for t in range(max_target_len):
-            decoder_output, decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
+            decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
             # Teacher forcing: next input is current target
             decoder_input = target_variable[t].view(1, -1)
             # Calculate and accumulate loss
@@ -68,11 +121,13 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             loss += mask_loss
             print_losses.append(mask_loss.item() * nTotal)
             n_totals += nTotal
+            # loss -= criterion(pred, target_variable[t])
     else:
         for t in range(max_target_len):
-            decoder_output, decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
+            decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
             # No teacher forcing: next input is decoder's own current output
             _, topi = pred.topk(1)
+            topi = topi
             decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
             decoder_input = decoder_input.to(device)
             # Calculate and accumulate loss
@@ -80,33 +135,42 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             loss += mask_loss
             print_losses.append(mask_loss.item() * nTotal)
             n_totals += nTotal
+            # loss -= criterion(pred, target_variable[t])
 
-    # Perform backpropagation
+    # Perform backpropagation)
     loss.backward()
 
+    # plt.figure()
+    # decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
+    # decoder_input = decoder_input.to(device)
+    # _, pred = decoder(decoder_input, encoder_hidden)
+    # p = pred.detach().numpy()[0].flatten()
+    # plt.plot(np.arange(len(p)), p)
+    # plt.show()
+
     # Clip gradients: gradients are modified in place
-    _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-    _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+    # _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    # _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
 
     # Adjust model weights
     encoder_optimizer.step()
     decoder_optimizer.step()
 
     return sum(print_losses) / n_totals
+    # return loss.item() / max_target_len
 
 
-def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, embedding,
-                     n_iteration, batch_size, print_every,
-                     save_every, corpus_name, teacher_forcing_ratio):
+def train_iterations(epoch, model_name, voc, pairs_train, pairs_valid, encoder, decoder, encoder_optimizer,
+                     decoder_optimizer, scheduler_encoder, scheduler_decoder, embedding,
+                     n_iteration=0, batch_size=64, print_every=10,
+                     save_every=10, corpus_name='', teacher_forcing_ratio=0.5, num_epochs=2):
 
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * 5.0)
     # Load batches for each iteration
-    training_batches = [batch_to_train_data(voc, [random.choice(pairs) for _ in range(batch_size)])
-                        for _ in range(n_iteration)]
-
-    scheduler_encoder = StepLR(encoder_optimizer, step_size=int(n_iteration / 20), gamma=0.1)
-    scheduler_decoder = StepLR(decoder_optimizer, step_size=int(n_iteration / 20), gamma=0.1)
+    pairs_randomized = np.random.permutation(pairs_train)
+    if n_iteration == 0:
+        n_iteration = int(len(pairs_train) / batch_size)  # do the whole dataset
+    training_batches = [batch_to_train_data(voc, [pairs_randomized[i * batch_size + k] for k in range(batch_size)])
+                        for i in range(n_iteration)]
 
     # Initializations
     print('Initializing ...')
@@ -125,17 +189,18 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
         # Run a training iteration with batch
         loss = train(input_variable, lengths, target_variable, mask, max_target_len,
                      encoder, decoder, encoder_optimizer, decoder_optimizer, teacher_forcing_ratio,
-                     batch_size, MAX_LENGTH)
+                     batch_size, MAX_LENGTH, voc=voc)
         print_loss += loss
 
-        scheduler_encoder.step()
-        scheduler_decoder.step()
+        # scheduler_encoder.step()
+        # scheduler_decoder.step()
 
         # Print progress
         if iteration % print_every == 0:
             print_loss_avg = print_loss / print_every
-            print("Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}"
-                  .format(iteration, iteration / n_iteration * 100, print_loss_avg))
+            print("Epoch: {}; Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}"
+                  .format(epoch + 1, iteration, (epoch * n_iteration + iteration) / (num_epochs * n_iteration) * 100,
+                          print_loss_avg))
             print_loss = 0
 
         # Save checkpoint
@@ -145,6 +210,7 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
                 os.makedirs(directory)
             torch.save({
                 'iteration': iteration,
+                'epoch': epoch + 1,
                 'en': encoder.state_dict(),
                 'de': decoder.state_dict(),
                 'en_opt': encoder_optimizer.state_dict(),
@@ -152,7 +218,24 @@ def train_iterations(model_name, voc, pairs, encoder, decoder, learning_rate, em
                 'loss': loss,
                 'voc_dict': voc.__dict__,
                 'embedding': embedding.state_dict()
-            }, os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
+            }, os.path.join(directory, '{}_{}_{}.tar'.format(epoch, iteration, 'checkpoint')))
+
+    val_loss = 0
+    n_valid_iters = int(len(pairs_valid) / batch_size)
+    valid_data = [batch_to_train_data(voc, [pairs_valid[i * batch_size + k] for k in range(batch_size)])
+                  for i in range(n_valid_iters)]
+    print('Beginning epoch validation...')
+    for d in valid_data:
+        input_variable, lengths, target_variable, mask, max_target_len = d
+        val_loss += validate(input_variable, lengths, target_variable, mask, max_target_len,
+                             encoder, decoder, batch_size)
+
+    validation_loss = val_loss / len(valid_data)
+
+    scheduler_encoder.step(validation_loss)
+    scheduler_decoder.step(validation_loss)
+
+    print('Epoch {} validation loss: {}'.format(epoch, validation_loss))
 
 
 def build_models(load_filename: bool = False,
@@ -163,17 +246,17 @@ def build_models(load_filename: bool = False,
                  embedding_size=256,
                  dataset_name='squad1',
                  model_name='boof',
-                 iteration=1):
+                 iteration=1,
+                 epoch=1):
     # Configure models
 
-    batch_struct = get_batches_from_dataset(dataset_name, batch_size)
-    input_variable, lengths, target_variable, mask, max_target_len, voc, pairs = batch_struct
+    voc, pairs_train, pairs_valid = get_vocab_and_sentence_pairs(dataset_name)
 
     # Load model if a loadFilename is provided
     if load_filename:
         directory = os.path.join(DATA_HOME, model_name, dataset_name)
         # If loading on same machine the model was trained on
-        checkpoint = torch.load(os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
+        checkpoint = torch.load(os.path.join(directory, '{}_{}_{}.tar'.format(epoch, iteration, 'checkpoint')))
         # If loading a model trained on GPU to CPU
         # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
         encoder_sd = checkpoint['en']

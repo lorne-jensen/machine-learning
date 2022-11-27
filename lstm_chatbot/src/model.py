@@ -29,12 +29,12 @@ class Encoder(nn.Module):
                             dropout=(0 if num_layers == 1 else dropout))
 
     def forward(self, i, input_lengths):
-        '''
+        """
         Inputs: i, the src vector
         Outputs: o, the encoder outputs
                 h, the hidden state
                 c, the cell state
-        '''
+        """
         # Convert word indexes to embeddings
         embedded = self.embedding(i)
         embedded = self.embedding_dropout(embedded)
@@ -48,6 +48,47 @@ class Encoder(nn.Module):
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
 
         return outputs, hidden
+
+
+# Luong attention layer
+class Attn(nn.Module):
+    def __init__(self, method, hidden_size):
+        super(Attn, self).__init__()
+        self.method = method
+        if self.method not in ['dot', 'general', 'concat']:
+            raise ValueError(self.method, "is not an appropriate attention method.")
+        self.hidden_size = hidden_size
+        if self.method == 'general':
+            self.attn = nn.Linear(self.hidden_size, hidden_size)
+        elif self.method == 'concat':
+            self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
+            self.v = nn.Parameter(torch.FloatTensor(hidden_size))
+
+    def dot_score(self, hidden, encoder_output):
+        return torch.sum(hidden * encoder_output, dim=2)
+
+    def general_score(self, hidden, encoder_output):
+        energy = self.attn(encoder_output)
+        return torch.sum(hidden * energy, dim=2)
+
+    def concat_score(self, hidden, encoder_output):
+        energy = self.attn(torch.cat((hidden.expand(encoder_output.size(0), -1, -1), encoder_output), 2)).tanh()
+        return torch.sum(self.v * energy, dim=2)
+
+    def forward(self, hidden, encoder_outputs):
+        # Calculate the attention weights (energies) based on the given method
+        if self.method == 'general':
+            attn_energies = self.general_score(hidden, encoder_outputs)
+        elif self.method == 'concat':
+            attn_energies = self.concat_score(hidden, encoder_outputs)
+        elif self.method == 'dot':
+            attn_energies = self.dot_score(hidden, encoder_outputs)
+
+        # Transpose max_length and batch_size dimensions
+        attn_energies = attn_energies.t()
+
+        # Return the softmax normalized probability scores (with added dimension)
+        return F.softmax(attn_energies, dim=1).unsqueeze(1)
 
 
 class Decoder(nn.Module):
@@ -67,10 +108,12 @@ class Decoder(nn.Module):
         self.lstm = nn.LSTM(self.embedding.embedding_dim, hidden_size, num_layers=num_layers,
                             dropout=(0 if num_layers == 1 else dropout))
 
+        self.concat = nn.Linear(hidden_size * 2, hidden_size)
+        self.attn = Attn('general', hidden_size)
         # self.ouput, predicts on the hidden state via a linear output layer
         self.output = nn.Linear(self.hidden_size, self.output_size)
 
-    def forward(self, input, last_hidden):
+    def forward(self, input, last_hidden, encoder_outputs=None):
         """
         Inputs: i, the target vector
         Outputs: o, the prediction
@@ -79,9 +122,23 @@ class Decoder(nn.Module):
         v = self.embedding(input)
         v = self.embedding_dropout(v)
         out, hidden = self.lstm(v, last_hidden)
-        prediction = F.softmax(self.output(out.squeeze(0)), dim=1)
 
-        return out, hidden, prediction
+        # attn_weights = self.attn(out, encoder_outputs)
+        #
+        # context = attn_weights.bmm(encoder_outputs.transpose(0, 1))
+        #
+        # out = out.squeeze(0)
+        # context = context.squeeze(1)
+        # concat_input = torch.cat((out, context), 1)
+        # concat_output = torch.tanh(self.concat(concat_input))
+        #
+        # out = self.output(concat_output)
+        # prediction = F.softmax(out, dim=1)
+        linear_out = self.output(out.squeeze(0))
+        linear_out[:, 0] = linear_out[:, 1] = -torch.inf  # PAD and SOS tokens always should have 0 probability
+        prediction = F.log_softmax(linear_out, dim=1)  # ignore the pad and SOS
+
+        return hidden, prediction
 
 
 class Seq2Seq(nn.Module):
@@ -107,7 +164,7 @@ class Seq2Seq(nn.Module):
         # Iteratively decode one word token at a time
         for _ in range(max_length):
             # Forward pass through decoder
-            decoder_output, decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden)
+            decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden, encoder_outputs)
             # Obtain most likely word token and its softmax score
             decoder_scores, decoder_input = torch.max(prediction, dim=1)
             # Record token and score
