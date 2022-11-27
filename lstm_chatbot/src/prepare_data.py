@@ -28,6 +28,9 @@ from src.vocab import Voc, EOS_token
 MAX_LENGTH = 25  # Maximum sentence length to consider
 MIN_COUNT = 2    # Minimum word count threshold for trimming
 
+###########################################################
+## Important: modify this to your directory of interest:
+###########################################################
 os.environ['MACHINE_LEARNING_DATA_HOME'] = 'A:/machine_learning/data'  # 'E:/machine_learning_udacity/data'
 
 DATA_HOME = os.environ['MACHINE_LEARNING_DATA_HOME']
@@ -196,7 +199,3 @@ def get_vocab_and_sentence_pairs(dataset_name):
     pairs_valid = trim_rare_words(voc, pairs_valid, MIN_COUNT)
 
     return voc, pairs_train, pairs_valid
-
-
-if __name__ == '__main__':
-    get_vocab_and_sentence_pairs('squad1', 5)

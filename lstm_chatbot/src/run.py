@@ -4,16 +4,11 @@ import torch.cuda
 from torch import nn, optim
 
 from src.eval import evaluate_input
-# from src.evaluate import evaluate_randomly
 from src.model import Encoder, Decoder
 from src.prepare_data import get_vocab_and_sentence_pairs
 from src.train import train_iterations, build_models
-# from src.train_model import train_model
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-batch_size = 64
 dataset = 'squad1'
 
 voc, pairs_train, pairs_valid = get_vocab_and_sentence_pairs(dataset)
@@ -26,18 +21,27 @@ input_size = voc.num_words
 output_size = voc.num_words
 # print('Input : {} Output : {}'.format(input_size, output_size))
 
+############################################
+#
+# Note: I did not have the ability to test
+# this on a GPU-enabled PC, so this might not
+# work on GPU
+#
+############################################
+
+batch_size = 128
 embed_size = 256
 hidden_size = 512
 num_layers = 1
-num_iteration = 50
-num_epochs = 2
+num_iteration = 0  # 0 means use the whole dataset, otherwise n=50 would take the first 50 of the randomized pairs
+num_epochs = 5
 learning_rate = 0.0001
 teacher_forcing_ratio = 0.5
 retrain = True
 
 embedding = nn.Embedding(voc.num_words, embed_size)
 
-model_name = 'boof'
+model_name = 'Simple_model'
 
 if retrain:
     encoder = Encoder(input_size, hidden_size, embedding, num_layers)
