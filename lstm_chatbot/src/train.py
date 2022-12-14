@@ -6,8 +6,9 @@ from torch import nn, optim
 from torch.optim.lr_scheduler import StepLR
 
 from src.data_to_tensors import batch_to_train_data
-from src.model import Encoder, Decoder
-from src.prepare_data import MAX_LENGTH, get_vocab_and_sentence_pairs, DATA_HOME
+from src.eval import evaluate
+from src.model import Encoder, Decoder, Seq2Seq
+from src.prepare_data import MAX_LENGTH, get_vocab_and_sentence_pairs, DATA_HOME, normalize_string
 from src.vocab import SOS_token
 import numpy as np
 
@@ -80,6 +81,8 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     encoder.train()
     decoder.train()
     # Zero gradients
+    encoder.zero_grad()
+    decoder.zero_grad()
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
@@ -111,7 +114,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Forward batch of sequences through decoder one time step at a time
     # criterion = nn.NLLLoss()
-    if use_teacher_forcing:
+    if True:
         for t in range(max_target_len):
             decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
             # Teacher forcing: next input is current target
@@ -158,6 +161,22 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     return sum(print_losses) / n_totals
     # return loss.item() / max_target_len
+
+
+def evaluate_iteration(encoder, decoder, voc, input_pair):
+    encoder.eval()
+    decoder.eval()
+    seq2seq = Seq2Seq(encoder, decoder)
+
+    # Normalize sentence
+    input_sentence = normalize_string(input_pair[0])
+    print('Input sentence: ', input_sentence)
+    # Evaluate sentence
+    output_words = evaluate(seq2seq, voc, input_sentence)
+    # Format and print response sentence
+    output_words[:] = [x for x in output_words if not (x == 'EOS' or x == 'PAD')]
+    print('Bot:', ' '.join(output_words))
+    print('Expected: ', input_pair[1])
 
 
 def train_iterations(epoch, model_name, voc, pairs_train, pairs_valid, encoder, decoder, encoder_optimizer,
@@ -232,6 +251,8 @@ def train_iterations(epoch, model_name, voc, pairs_train, pairs_valid, encoder, 
 
     validation_loss = val_loss / len(valid_data)
 
+    rand_pair = pairs_train[np.random.randint(0, len(pairs_train))]
+    evaluate_iteration(encoder, decoder, voc, rand_pair)
     scheduler_encoder.step(validation_loss)
     scheduler_decoder.step(validation_loss)
 
