@@ -45,7 +45,7 @@ def validate(input_variable, lengths, target_variable, mask, max_target_len, enc
     n_totals = 0
 
     # Forward pass through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    encoder_outputs, encoder_hidden = encoder(input_variable)
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
@@ -81,8 +81,6 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     encoder.train()
     decoder.train()
     # Zero gradients
-    encoder.zero_grad()
-    decoder.zero_grad()
     encoder_optimizer.zero_grad()
     decoder_optimizer.zero_grad()
 
@@ -90,8 +88,6 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     input_variable = input_variable.to(device)
     target_variable = target_variable.to(device)
     mask = mask.to(device)
-    # Lengths for rnn packing should always be on the cpu
-    lengths = lengths.to("cpu")
 
     # Initialize variables
     loss = 0
@@ -99,7 +95,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
-    encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    encoder_outputs, encoder_hidden = encoder(input_variable)
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
@@ -113,31 +109,36 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
 
     # Forward batch of sequences through decoder one time step at a time
-    # criterion = nn.NLLLoss()
-    if True:
+    criterion = nn.CrossEntropyLoss()
+
+    if use_teacher_forcing:
         for t in range(max_target_len):
-            decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
+            decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
             # Teacher forcing: next input is current target
             decoder_input = target_variable[t].view(1, -1)
             # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
+            # mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
+            # nTotal = mask[t].sum()
+            mask_loss = criterion(pred, target_variable[t])
             loss += mask_loss
-            print_losses.append(mask_loss.item() * nTotal)
-            n_totals += nTotal
+            print_losses.append(mask_loss.item())
+            # n_totals += nTotal
             # loss -= criterion(pred, target_variable[t])
     else:
         for t in range(max_target_len):
-            decoder_hidden, pred = decoder(decoder_input, decoder_hidden, encoder_outputs)
+            decoder_hidden, pred = decoder(decoder_input, decoder_hidden)
             # No teacher forcing: next input is decoder's own current output
             _, topi = pred.topk(1)
             topi = topi
             decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
             decoder_input = decoder_input.to(device)
             # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
+            # mask_loss, nTotal = maskNLLLoss(pred, target_variable[t], mask[t])
+            nTotal = mask[t].sum()
+            mask_loss = criterion(pred, target_variable[t])
             loss += mask_loss
-            print_losses.append(mask_loss.item() * nTotal)
-            n_totals += nTotal
+            print_losses.append(mask_loss.item())
+            # n_totals += nTotal
             # loss -= criterion(pred, target_variable[t])
 
     # Perform backpropagation)
@@ -152,15 +153,14 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     # plt.show()
 
     # Clip gradients: gradients are modified in place
-    # _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-    # _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+    _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+    _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
 
     # Adjust model weights
     encoder_optimizer.step()
     decoder_optimizer.step()
 
-    return sum(print_losses) / n_totals
-    # return loss.item() / max_target_len
+    return sum(print_losses) / max_target_len
 
 
 def evaluate_iteration(encoder, decoder, voc, input_pair):
@@ -243,6 +243,10 @@ def train_iterations(epoch, model_name, voc, pairs_train, pairs_valid, encoder, 
     n_valid_iters = int(len(pairs_valid) / batch_size)
     valid_data = [batch_to_train_data(voc, [pairs_valid[i * batch_size + k] for k in range(batch_size)])
                   for i in range(n_valid_iters)]
+    # Do a random evaluation to see where we're at:
+    print('Random test of current seq2seq state:')
+    rand_pair = pairs_train[np.random.randint(0, len(pairs_train))]
+    evaluate_iteration(encoder, decoder, voc, rand_pair)
     print('Beginning epoch validation...')
     for d in valid_data:
         input_variable, lengths, target_variable, mask, max_target_len = d
@@ -251,8 +255,6 @@ def train_iterations(epoch, model_name, voc, pairs_train, pairs_valid, encoder, 
 
     validation_loss = val_loss / len(valid_data)
 
-    rand_pair = pairs_train[np.random.randint(0, len(pairs_train))]
-    evaluate_iteration(encoder, decoder, voc, rand_pair)
     scheduler_encoder.step(validation_loss)
     scheduler_decoder.step(validation_loss)
 

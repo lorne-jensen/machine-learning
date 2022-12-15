@@ -4,6 +4,8 @@ from src.data_to_tensors import indexes_from_sentence
 from src.model import Seq2Seq
 from src.prepare_data import normalize_string, MAX_LENGTH
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def evaluate(seq2seq, voc, sentence, max_length=MAX_LENGTH):
     ### Format input sentence as a batch
@@ -15,10 +17,9 @@ def evaluate(seq2seq, voc, sentence, max_length=MAX_LENGTH):
     input_batch = torch.LongTensor(indexes_batch).transpose(0, 1)
     # Use appropriate device
     if torch.cuda.is_available():
-        input_batch = input_batch.to('cuda')
-    lengths = lengths.to("cpu")
+        input_batch = input_batch.to(device)
     # Decode sentence with searcher
-    tokens, scores = seq2seq(input_batch, lengths, max_length)
+    tokens, scores = seq2seq(input_batch, max_length)
     # indexes -> words
     decoded_words = [voc.index2word[token.item()] for token in tokens]
     return decoded_words

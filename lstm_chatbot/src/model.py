@@ -28,7 +28,7 @@ class Encoder(nn.Module):
         self.lstm = nn.LSTM(input_size=embedding.embedding_dim, hidden_size=hidden_size, num_layers=num_layers,
                             dropout=(0 if num_layers == 1 else dropout))
 
-    def forward(self, i, input_lengths):
+    def forward(self, i):
         """
         Inputs: i, the src vector
         Outputs: o, the encoder outputs
@@ -38,15 +38,7 @@ class Encoder(nn.Module):
         # Convert word indexes to embeddings
         embedded = self.embedding(i)
         embedded = self.embedding_dropout(embedded)
-        # Pack padded batch of sequences for RNN module
-        # # Forward pass through LSTM, returns outputs, hidden, c
-        # return self.lstm(embedded)
-        packed = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
-        # Forward pass through GRU
-        outputs, hidden = self.lstm(packed)
-        # Unpack padding
-        outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
-
+        outputs, hidden = self.lstm(embedded)
         return outputs, hidden
 
 
@@ -67,12 +59,9 @@ class Decoder(nn.Module):
         self.lstm = nn.LSTM(self.embedding.embedding_dim, hidden_size, num_layers=num_layers,
                             dropout=(0 if num_layers == 1 else dropout))
 
-        self.concat = nn.Linear(hidden_size * 2, hidden_size)
-        # self.attn = Attn('general', hidden_size)
-        # self.ouput, predicts on the hidden state via a linear output layer
         self.output = nn.Linear(self.hidden_size, self.output_size)
 
-    def forward(self, input, last_hidden, encoder_outputs=None):
+    def forward(self, input, last_hidden):
         """
         Inputs: i, the target vector
         Outputs: o, the prediction
@@ -83,10 +72,11 @@ class Decoder(nn.Module):
         out, hidden = self.lstm(v, last_hidden)
 
         linear_out = self.output(out.squeeze(0))
-        linear_out[:, 0] = linear_out[:, 1] = -torch.inf  # PAD and SOS tokens always should have 0 probability
-        prediction = F.log_softmax(linear_out, dim=1)  # ignore the pad and SOS
+        # linear_out[:, 0] = linear_out[:, 1] = -torch.inf  # PAD and SOS tokens always should have 0 probability
+        logits = linear_out
+        prediction = F.log_softmax(logits, dim=1)  # ignore the pad and SOS
 
-        return hidden, prediction
+        return hidden, logits
 
 
 class Seq2Seq(nn.Module):
@@ -99,12 +89,13 @@ class Seq2Seq(nn.Module):
         self.decoder: Decoder = decoder
         self.decoder.to(self.device)
 
-    def forward(self, input, input_length, max_length):
+    def forward(self, input, max_length):
 
-        encoder_outputs, encoder_hidden = self.encoder(input, input_length)
+        encoder_outputs, encoder_hidden = self.encoder(input)
 
         decoder_hidden = encoder_hidden
         decoder_input = torch.ones(1, 1, device='cpu', dtype=torch.long) * SOS_token
+        decoder_input.to(self.device)
 
         all_tokens = torch.zeros([0], device=self.device, dtype=torch.long)
         all_scores = torch.zeros([0], device=self.device)
@@ -112,7 +103,7 @@ class Seq2Seq(nn.Module):
         # Iteratively decode one word token at a time
         for _ in range(max_length):
             # Forward pass through decoder
-            decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden, encoder_outputs)
+            decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden)
             # Obtain most likely word token and its softmax score
             decoder_scores, decoder_input = torch.max(prediction, dim=1)
             # Record token and score

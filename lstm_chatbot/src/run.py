@@ -33,9 +33,9 @@ batch_size = 128
 embed_size = 256
 hidden_size = 512
 num_layers = 1
-num_iteration = 50  # 0 means use the whole dataset, otherwise n=50 would take the first 50 of the randomized pairs
-num_epochs = 5
-learning_rate = 0.0001
+num_iteration = 100  # 0 means use the whole dataset, otherwise n=50 would take the first 50 of the randomized pairs
+num_epochs = 10
+learning_rate = 0.025
 teacher_forcing_ratio = 0.5
 retrain = True
 
