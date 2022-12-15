@@ -103,9 +103,9 @@ class Seq2Seq(nn.Module):
         # Iteratively decode one word token at a time
         for _ in range(max_length):
             # Forward pass through decoder
-            decoder_hidden, prediction = self.decoder(decoder_input, decoder_hidden)
+            decoder_hidden, logits = self.decoder(decoder_input, decoder_hidden)
             # Obtain most likely word token and its softmax score
-            decoder_scores, decoder_input = torch.max(prediction, dim=1)
+            decoder_scores, decoder_input = torch.max(logits, dim=1)
             # Record token and score
             all_tokens = torch.cat((all_tokens, decoder_input), dim=0)
             all_scores = torch.cat((all_scores, decoder_scores), dim=0)
